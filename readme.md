@@ -2,6 +2,10 @@
 
 This project visualizes a field of animated, wind-blown crops using [Three.js](https://threejs.org/) and GPU instancing. You can interactively control wind strength and speed.
 
+## Live Preview
+
+[https://crop-field-treejs.vercel.app/](https://crop-field-treejs.vercel.app/)
+
 ## Features
 
 - 10,000 instanced crop blades with custom wind shader
@@ -23,4 +27,4 @@ No build step required.
 
 ## File Structure
 
-- `index.html` – Main application and all code
+- `index.html` – Main application

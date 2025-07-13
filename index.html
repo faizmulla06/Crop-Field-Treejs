@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instanced Crop Field</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: Arial;
+        }
+        input {
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <h3>Wind Controls</h3>
+        <label>Wind Strength: <span id="strengthValue">1.0</span><br>
+            <input type="range" id="strength" min="0" max="3" step="0.1" value="1">
+        </label><br><br>
+        <label>Wind Speed: <span id="speedValue">1.0</span><br>
+            <input type="range" id="speed" min="0.1" max="3" step="0.1" value="1">
+        </label>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.155.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.155.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let windStrength = 1.0;
+        let windSpeed = 1.0;
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 10, 50);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(15, 10, 15);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        sunLight.position.set(20, 20, 20);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        scene.add(sunLight);
+
+        // Ground
+        const groundGeo = new THREE.PlaneGeometry(100, 100);
+        const groundMat = new THREE.MeshLambertMaterial({ color: 0x8B7355 });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Instanced crop shader
+        const instancedVertexShader = `
+            attribute vec3 offset;
+            attribute float scale;
+            attribute float random;
+            
+            varying vec2 vUv;
+            varying float vHeight;
+            
+            uniform float time;
+            uniform float windStrength;
+            uniform float windSpeed;
+            
+            void main() {
+                vUv = uv;
+                vHeight = position.y;
+                
+                vec3 pos = position * scale;
+                vec3 worldPos = pos + offset;
+                
+                // Wind calculation
+                float windEffect = sin(worldPos.x * 0.1 + time * windSpeed) * 
+                                  cos(worldPos.z * 0.1 + time * windSpeed * 0.7);
+                
+                // Add turbulence
+                windEffect += sin(worldPos.x * 0.5 + time * windSpeed * 2.0) * 0.2;
+                
+                // Height-based bending
+                float bend = windEffect * windStrength * smoothstep(0.0, 1.0, vHeight);
+                
+                pos.x += bend;
+                pos.z += bend * 0.3;
+                
+                // Add to offset
+                pos += offset;
+                
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+            }
+        `;
+
+        const instancedFragmentShader = `
+            varying vec2 vUv;
+            varying float vHeight;
+            
+            void main() {
+                vec3 baseColor = vec3(0.2, 0.4, 0.1);
+                vec3 tipColor = vec3(0.9, 0.8, 0.3);
+                
+                vec3 color = mix(baseColor, tipColor, smoothstep(0.0, 1.0, vHeight));
+                
+                gl_FragColor = vec4(color, 1.0);
+            }
+        `;
+
+        // Create instanced mesh
+        const geometry = new THREE.ConeGeometry(0.05, 2, 4, 1);
+        geometry.translate(0, 1, 0);
+
+        const material = new THREE.ShaderMaterial({
+            vertexShader: instancedVertexShader,
+            fragmentShader: instancedFragmentShader,
+            uniforms: {
+                time: { value: 0 },
+                windStrength: { value: windStrength },
+                windSpeed: { value: windSpeed }
+            }
+        });
+
+        const count = 10000;
+        const mesh = new THREE.InstancedMesh(geometry, material, count);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+
+        // Position instances
+        const dummy = new THREE.Object3D();
+        const offsets = [];
+        const scales = [];
+        const randoms = [];
+
+        for (let i = 0; i < count; i++) {
+            const x = (Math.random() - 0.5) * 40;
+            const z = (Math.random() - 0.5) * 40;
+            
+            dummy.position.set(x, 0, z);
+            dummy.rotation.y = Math.random() * Math.PI * 2;
+            dummy.scale.setScalar(0.8 + Math.random() * 0.4);
+            dummy.updateMatrix();
+            
+            mesh.setMatrixAt(i, dummy.matrix);
+            
+            offsets.push(x, 0, z);
+            scales.push(dummy.scale.x);
+            randoms.push(Math.random());
+        }
+
+        // Add attributes
+        geometry.setAttribute('offset', new THREE.InstancedBufferAttribute(new Float32Array(offsets), 3));
+        geometry.setAttribute('scale', new THREE.InstancedBufferAttribute(new Float32Array(scales), 1));
+        geometry.setAttribute('random', new THREE.InstancedBufferAttribute(new Float32Array(randoms), 1));
+
+        scene.add(mesh);
+
+        // Controls
+        document.getElementById('strength').addEventListener('input', (e) => {
+            windStrength = parseFloat(e.target.value);
+            material.uniforms.windStrength.value = windStrength;
+            document.getElementById('strengthValue').textContent = windStrength.toFixed(1);
+        });
+
+        document.getElementById('speed').addEventListener('input', (e) => {
+            windSpeed = parseFloat(e.target.value);
+            material.uniforms.windSpeed.value = windSpeed;
+            document.getElementById('speedValue').textContent = windSpeed.toFixed(1);
+        });
+
+        // Animation
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            material.uniforms.time.value = clock.getElapsedTime();
+            
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
